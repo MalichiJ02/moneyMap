@@ -105,6 +105,49 @@ class PlannedExpense {
       );
 }
 
+class RecurringEntry {
+  const RecurringEntry({
+    required this.id,
+    required this.title,
+    required this.isIncome,
+    required this.category,
+    required this.amount,
+    required this.nextDate,
+    required this.frequency,
+  });
+
+  final String id;
+  final String title;
+  final bool isIncome;
+  final String category;
+  final int amount;
+  final DateTime nextDate;
+  final String frequency; // weekly or monthly
+
+  RecurringEntry next() {
+    final maxDay = DateTime(nextDate.year, nextDate.month + 2, 0).day;
+    final newDate = frequency == 'weekly'
+        ? nextDate.add(const Duration(days: 7))
+        : DateTime(nextDate.year, nextDate.month + 1,
+            nextDate.day > maxDay ? maxDay : nextDate.day);
+    return RecurringEntry(id: id, title: title, isIncome: isIncome,
+      category: category, amount: amount, nextDate: newDate, frequency: frequency);
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id, 'title': title, 'isIncome': isIncome, 'category': category,
+    'amount': amount, 'nextDate': nextDate.toIso8601String(), 'frequency': frequency,
+  };
+
+  factory RecurringEntry.fromJson(Map<String, dynamic> json) => RecurringEntry(
+    id: json['id'] as String, title: json['title'] as String,
+    isIncome: json['isIncome'] as bool, category: json['category'] as String,
+    amount: (json['amount'] as num).toInt(),
+    nextDate: DateTime.parse(json['nextDate'] as String),
+    frequency: json['frequency'] as String,
+  );
+}
+
 class MoneyTask {
   const MoneyTask({
     required this.id,
@@ -147,6 +190,7 @@ class MoneyData {
   DateTime startingDate;
   final List<MoneyTransaction> transactions = [];
   final List<PlannedExpense> plannedExpenses = [];
+  final List<RecurringEntry> recurring = [];
   final List<MoneyTask> tasks = [];
   final Map<String, int> monthlyLimits = {};
 
@@ -155,6 +199,7 @@ class MoneyData {
         'startingDate': startingDate.toIso8601String(),
         'transactions': transactions.map((t) => t.toJson()).toList(),
         'plannedExpenses': plannedExpenses.map((e) => e.toJson()).toList(),
+        'recurring': recurring.map((e) => e.toJson()).toList(),
         'tasks': tasks.map((t) => t.toJson()).toList(),
         'monthlyLimits': monthlyLimits,
       };
@@ -169,6 +214,9 @@ class MoneyData {
     }
     for (final item in json['plannedExpenses'] as List<dynamic>? ?? []) {
       data.plannedExpenses.add(PlannedExpense.fromJson(item as Map<String, dynamic>));
+    }
+    for (final item in json['recurring'] as List<dynamic>? ?? []) {
+      data.recurring.add(RecurringEntry.fromJson(item as Map<String, dynamic>));
     }
     for (final item in json['tasks'] as List<dynamic>? ?? []) {
       data.tasks.add(MoneyTask.fromJson(item as Map<String, dynamic>));

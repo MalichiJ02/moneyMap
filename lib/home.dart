@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
 import 'models.dart';
+import 'password.dart';
 import 'storage.dart';
 
 class MoneyMapHome extends StatefulWidget {
-  const MoneyMapHome({super.key});
+  const MoneyMapHome({super.key, required this.onLock, required this.passwords});
+
+  final VoidCallback onLock;
+  final LocalPassword passwords;
 
   @override
   State<MoneyMapHome> createState() => _MoneyMapHomeState();
@@ -19,6 +23,7 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
   bool _saving = false;
   String? _error;
   int _range = 1; // 0 daily, 1 weekly, 2 monthly
+  int _page = 0;
   int _nextId = 0;
 
   @override
@@ -138,7 +143,7 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
   Future<void> _startingBalanceDialog() async {
     final controller = TextEditingController(text: inputMoney(_data.startingBalance));
     var date = _data.startingDate;
-    final result = await showDialog<(int, DateTime)>(
+    final route = DialogRoute<(int, DateTime)>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
@@ -180,6 +185,8 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
         ),
       ),
     );
+    final result = await Navigator.of(context).push(route);
+    await route.completed;
     controller.dispose();
     if (result == null || !mounted) return;
     setState(() {
@@ -195,7 +202,7 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
     var income = existing?.isIncome ?? false;
     var category = existing?.category ?? expenseCategories.first;
     var date = existing?.date ?? day(DateTime.now());
-    final result = await showDialog<MoneyTransaction>(
+    final route = DialogRoute<MoneyTransaction>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, update) {
@@ -267,6 +274,8 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
         },
       ),
     );
+    final result = await Navigator.of(context).push(route);
+    await route.completed;
     title.dispose();
     amount.dispose();
     if (result == null || !mounted) return;
@@ -286,7 +295,7 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
     final amount = TextEditingController(text: existing == null ? '' : inputMoney(existing.amount));
     var category = existing?.category ?? expenseCategories.first;
     var due = existing?.dueDate ?? day(DateTime.now());
-    final result = await showDialog<PlannedExpense>(
+    final route = DialogRoute<PlannedExpense>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
@@ -336,6 +345,8 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
         ),
       ),
     );
+    final result = await Navigator.of(context).push(route);
+    await route.completed;
     title.dispose();
     amount.dispose();
     if (result == null || !mounted) return;
@@ -377,7 +388,7 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
   Future<void> _limitDialog() async {
     var category = expenseCategories.first;
     final controller = TextEditingController();
-    final result = await showDialog<(String, int)>(
+    final route = DialogRoute<(String, int)>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
@@ -408,6 +419,8 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
         ),
       ),
     );
+    final result = await Navigator.of(context).push(route);
+    await route.completed;
     controller.dispose();
     if (result == null || !mounted) return;
     setState(() => _data.monthlyLimits[result.$1] = result.$2);
@@ -417,7 +430,7 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
   Future<void> _taskDialog([MoneyTask? existing]) async {
     final controller = TextEditingController(text: existing?.title ?? '');
     var due = existing?.dueDate ?? day(DateTime.now());
-    final result = await showDialog<MoneyTask>(
+    final route = DialogRoute<MoneyTask>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
@@ -450,6 +463,8 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
         ),
       ),
     );
+    final result = await Navigator.of(context).push(route);
+    await route.completed;
     controller.dispose();
     if (result == null || !mounted) return;
     setState(() {
@@ -461,6 +476,144 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
       }
     });
     await _save();
+  }
+
+  Future<void> _recurringDialog([RecurringEntry? existing]) async {
+    final title = TextEditingController(text: existing?.title ?? '');
+    final amount = TextEditingController(text: existing == null ? '' : inputMoney(existing.amount));
+    var income = existing?.isIncome ?? false;
+    var category = existing?.category ?? expenseCategories.first;
+    var frequency = existing?.frequency ?? 'monthly';
+    var due = existing?.nextDate ?? day(DateTime.now());
+    final route = DialogRoute<RecurringEntry>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: Text(existing == null ? 'Add repeating item' : 'Edit repeating item'),
+          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: title, decoration: const InputDecoration(labelText: 'Name')),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<bool>(
+              initialValue: income, decoration: const InputDecoration(labelText: 'Type'),
+              items: const [
+                DropdownMenuItem(value: false, child: Text('Expense')),
+                DropdownMenuItem(value: true, child: Text('Income')),
+              ],
+              onChanged: (value) { if (value != null) {
+                update(() {
+                income = value;
+                category = income ? incomeCategories.first : expenseCategories.first;
+              });
+              } },
+            ),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<String>(
+              key: ValueKey(income), initialValue: category,
+              decoration: const InputDecoration(labelText: 'Category'),
+              items: (income ? incomeCategories : expenseCategories)
+                .map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+              onChanged: (value) { if (value != null) update(() => category = value); },
+            ),
+            const SizedBox(height: 10),
+            TextField(controller: amount,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Amount in kwacha')),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<String>(
+              initialValue: frequency, decoration: const InputDecoration(labelText: 'Repeats'),
+              items: const [
+                DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
+                DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
+              ],
+              onChanged: (value) { if (value != null) update(() => frequency = value); },
+            ),
+            TextButton.icon(icon: const Icon(Icons.calendar_today),
+              label: Text('Next due ${shortDate(due)}'),
+              onPressed: () async {
+                final picked = await _pickDate(due);
+                if (picked != null && dialogContext.mounted) update(() => due = picked);
+              }),
+          ])),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final parsed = parseMoney(amount.text);
+              if (parsed == null || title.text.trim().isEmpty) {
+                _message('Enter a name and an amount above K0.'); return;
+              }
+              Navigator.pop(dialogContext, RecurringEntry(
+                id: existing?.id ?? _id(), title: title.text.trim(), isIncome: income,
+                category: category, amount: parsed, nextDate: due, frequency: frequency,
+              ));
+            }, child: const Text('Save')),
+          ],
+        ),
+      ),
+    );
+    final result = await Navigator.of(context).push(route);
+    await route.completed;
+    title.dispose(); amount.dispose();
+    if (result == null || !mounted) return;
+    setState(() {
+      if (existing == null) {
+        _data.recurring.add(result);
+      } else {
+        final index = _data.recurring.indexWhere((e) => e.id == existing.id);
+        if (index >= 0) _data.recurring[index] = result;
+      }
+    });
+    await _save();
+  }
+
+  Future<void> _recordRecurring(RecurringEntry entry) async {
+    final label = entry.isIncome ? 'received' : 'paid';
+    final confirmed = await showDialog<bool>(context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Mark $label?'),
+        content: Text('Record ${money(entry.amount)} as ${entry.isIncome ? 'income' : 'an expense'} today?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: Text('Mark $label')),
+        ],
+      ));
+    if (confirmed != true || !mounted) return;
+    final index = _data.recurring.indexWhere((e) => e.id == entry.id);
+    if (index < 0) return;
+    setState(() {
+      _data.transactions.add(MoneyTransaction(id: _id(), isIncome: entry.isIncome,
+        category: entry.category, description: entry.title, amount: entry.amount,
+        date: day(DateTime.now())));
+      _data.recurring[index] = entry.next();
+    });
+    await _save();
+  }
+
+  Widget _recurring() {
+    final items = [..._data.recurring]..sort((a, b) => a.nextDate.compareTo(b.nextDate));
+    return _section('Repeating money', Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (items.isEmpty) const Text('Add rent, salary, subscriptions, or other repeating items.'),
+      ...items.map((entry) => ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(entry.isIncome ? Icons.arrow_downward : Icons.arrow_upward,
+          color: entry.isIncome ? Colors.greenAccent : Colors.orangeAccent),
+        title: Text('${entry.title} · ${money(entry.amount)}'),
+        subtitle: Text('${entry.frequency} · Next ${shortDate(entry.nextDate)}'),
+        trailing: PopupMenuButton<String>(
+          onSelected: (action) async {
+            if (action == 'record') { await _recordRecurring(entry); return; }
+            if (action == 'edit') { await _recurringDialog(entry); return; }
+            setState(() => _data.recurring.removeWhere((e) => e.id == entry.id));
+            await _save();
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(value: 'record', child: Text(entry.isIncome ? 'Mark received' : 'Mark paid')),
+            const PopupMenuItem(value: 'edit', child: Text('Edit')),
+            const PopupMenuItem(value: 'delete', child: Text('Remove')),
+          ],
+        ),
+      )),
+    ]), action: IconButton(tooltip: 'Add repeating item',
+      icon: const Icon(Icons.add), onPressed: () => _recurringDialog()));
   }
 
   Widget _section(String title, Widget body, {Widget? action}) => Card(
@@ -517,7 +670,6 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
       cursor = _previousPeriod(cursor);
     }
     final values = starts.map((s) => _balanceBefore(_nextPeriod(s))).toList();
-    final largest = values.fold<int>(1, (max, v) => v.abs() > max ? v.abs() : max);
 
     final trend = change > 0
         ? 'Balance improved by ${money(change)} this period.'
@@ -543,25 +695,21 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
       Text(trend, style: TextStyle(fontWeight: FontWeight.bold,
         color: change < 0 ? Colors.red.shade700 : Colors.green.shade700)),
       const SizedBox(height: 14),
-      const Text('Ending balance by period'),
-      ...List.generate(starts.length, (index) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(children: [
-          SizedBox(width: 82, child: Text(_periodLabel(starts[index]), style: const TextStyle(fontSize: 11))),
-          Expanded(child: LinearProgressIndicator(
-            value: values[index].abs() / largest,
-            minHeight: 14,
-            backgroundColor: Colors.grey.shade200,
-            color: values[index] < 0 ? Colors.red : Colors.blue,
-          )),
-          const SizedBox(width: 6),
-          SizedBox(width: 90, child: Text(money(values[index]), textAlign: TextAlign.right,
-            style: const TextStyle(fontSize: 11))),
-        ]),
-      )),
+      const Text('Ending balance curve'),
       const SizedBox(height: 8),
-      const Text('The bars show the size of each ending balance; red means negative. '
-        'Upcoming expenses have not yet been deducted.', style: TextStyle(fontSize: 12)),
+      SizedBox(height: 190, width: double.infinity,
+        child: CustomPaint(painter: _BalanceLinePainter(values))),
+      const SizedBox(height: 6),
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        for (var index = 0; index < starts.length; index++)
+          Expanded(child: Text(_periodLabel(starts[index]), textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 9))),
+      ]),
+      Text('From ${money(values.first)} to ${money(values.last)}',
+        style: const TextStyle(fontSize: 12)),
+      const SizedBox(height: 8),
+      const Text('Upcoming expenses have not yet been deducted from the curve.',
+        style: TextStyle(fontSize: 12)),
     ]));
   }
 
@@ -602,6 +750,48 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
       }),
     ]), action: IconButton(
       tooltip: 'Plan expense', icon: const Icon(Icons.add), onPressed: () => _plannedDialog()));
+  }
+
+  Widget _forecast() {
+    final today = day(DateTime.now());
+    final cutoff = today.add(const Duration(days: 30));
+    final events = <(DateTime, int, String)>[];
+    for (final expense in _data.plannedExpenses) {
+      if (!day(expense.dueDate).isAfter(cutoff)) {
+        events.add((day(expense.dueDate).isBefore(today) ? today : day(expense.dueDate),
+          -expense.amount, expense.title));
+      }
+    }
+    for (final entry in _data.recurring) {
+      var next = entry;
+      for (var count = 0; count < 60 && !day(next.nextDate).isAfter(cutoff); count++) {
+        events.add((day(next.nextDate).isBefore(today) ? today : day(next.nextDate),
+          entry.isIncome ? entry.amount : -entry.amount, entry.title));
+        next = next.next();
+      }
+    }
+    events.sort((a, b) => a.$1.compareTo(b.$1));
+    var projected = _balance;
+    var lowest = projected;
+    DateTime? shortfall;
+    for (final event in events) {
+      projected += event.$2;
+      if (projected < lowest) lowest = projected;
+      if (projected < 0 && shortfall == null) shortfall = event.$1;
+    }
+    return _section('Next 30 days', Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('Projected closing balance: ${money(projected)}',
+        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      Text('Lowest projected balance: ${money(lowest)}'),
+      if (shortfall != null) Text('Possible shortfall on ${shortDate(shortfall)}',
+        style: const TextStyle(color: Color(0xFFFF8D9B), fontWeight: FontWeight.bold))
+      else Text(events.isEmpty ? 'Plan income and bills to see a forecast.'
+          : 'No shortfall indicated by the amounts entered.',
+        style: const TextStyle(color: Color(0xFF6DE7C0))),
+      const SizedBox(height: 8),
+      const Text('This forecast includes planned and repeating items, not unplanned spending. '
+        'Expected income is not guaranteed.', style: TextStyle(fontSize: 12)),
+    ]));
   }
 
   Widget _limits() {
@@ -701,15 +891,115 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
       tooltip: 'Add task', icon: const Icon(Icons.add), onPressed: () => _taskDialog()));
   }
 
+  Future<void> _changePassword() async {
+    final old = TextEditingController();
+    final next = TextEditingController();
+    final confirm = TextEditingController();
+    final route = DialogRoute<(String, String)>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Change password'),
+        content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: old, obscureText: true, decoration: const InputDecoration(labelText: 'Current password')),
+          const SizedBox(height: 12),
+          TextField(controller: next, obscureText: true, decoration: const InputDecoration(labelText: 'New password')),
+          const SizedBox(height: 12),
+          TextField(controller: confirm, obscureText: true, decoration: const InputDecoration(labelText: 'Confirm new password')),
+        ])),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          FilledButton(onPressed: () {
+            if (next.text.length < 8 || next.text != confirm.text) {
+              _message('Use 8+ characters and make sure the new passwords match.');
+              return;
+            }
+            Navigator.pop(dialogContext, (old.text, next.text));
+          }, child: const Text('Change')),
+        ],
+      ),
+    );
+    final result = await Navigator.of(context).push(route);
+    await route.completed;
+    old.dispose(); next.dispose(); confirm.dispose();
+    if (result == null || !mounted) return;
+    try {
+      final changed = await widget.passwords.change(result.$1, result.$2);
+      _message(changed ? 'Password changed.' : 'Current password was incorrect.');
+    } catch (error) {
+      _message('Password change failed: $error');
+    }
+  }
+
+  Widget _dashboard() => ListView(padding: const EdgeInsets.all(14), children: [
+    if (_error != null) Card(color: const Color(0xFF632939),
+      child: Padding(padding: const EdgeInsets.all(12), child: Text(_error!))),
+    _summary(),
+    _forecast(),
+    _section('Quick actions', Wrap(spacing: 10, runSpacing: 8, children: [
+      FilledButton.icon(onPressed: () => _transactionDialog(),
+        icon: const Icon(Icons.add), label: const Text('Record money')),
+      OutlinedButton.icon(onPressed: () => _plannedDialog(),
+        icon: const Icon(Icons.event), label: const Text('Plan payment')),
+    ])),
+    _upcoming(),
+  ]);
+
+  Widget _settings() => ListView(padding: const EdgeInsets.all(14), children: [
+    _section('Security', Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('A password locks MoneyMap on this device.'),
+      const SizedBox(height: 10),
+      OutlinedButton.icon(onPressed: _changePassword,
+        icon: const Icon(Icons.password), label: const Text('Change password')),
+      const SizedBox(height: 8),
+      FilledButton.icon(onPressed: widget.onLock,
+        icon: const Icon(Icons.lock_outline), label: const Text('Lock now')),
+    ])),
+    _section('Your data', const Text(
+      'Your records are currently saved in this device’s app files. '
+      'The password locks the interface; it does not encrypt the financial data file. '
+      'Uninstalling the app may erase the data. There is no online account or recovery service yet.'
+    )),
+  ]);
+
+  Widget _pageContent() {
+    switch (_page) {
+      case 0: return _dashboard();
+      case 1: return ListView(padding: const EdgeInsets.all(14), children: [_transactions()]);
+      case 2: return ListView(padding: const EdgeInsets.all(14), children: [_reports(), _limits()]);
+      case 3: return ListView(padding: const EdgeInsets.all(14), children: [_forecast(), _upcoming(), _recurring(), _tasks()]);
+      default: return _settings();
+    }
+  }
+
+  void _selectPage(int page) => setState(() => _page = page);
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('MoneyMap'), actions: [
+      appBar: AppBar(title: Text(const ['Overview', 'Transactions', 'Trends', 'Planner', 'Settings'][_page]), actions: [
         if (_saving) const Padding(
           padding: EdgeInsets.all(16),
           child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
         ),
       ]),
+      drawer: Drawer(child: SafeArea(child: ListView(children: [
+        const DrawerHeader(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.end, children: [
+            Icon(Icons.account_balance_wallet_outlined, size: 42, color: Color(0xFF62C4FF)),
+            SizedBox(height: 10),
+            Text('MoneyMap', style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold)),
+            Text('See where your money moves'),
+          ])),
+        for (final (index, label, icon) in const [
+          (0, 'Overview', Icons.home_outlined),
+          (1, 'Transactions', Icons.receipt_long_outlined),
+          (2, 'Trends and limits', Icons.show_chart),
+          (3, 'Planner', Icons.event_note_outlined),
+          (4, 'Settings and security', Icons.settings_outlined),
+        ])
+          ListTile(leading: Icon(icon), title: Text(label), selected: _page == index,
+            onTap: () { Navigator.pop(context); _selectPage(index); }),
+      ]))),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _loadFailed
@@ -721,18 +1011,62 @@ class _MoneyMapHomeState extends State<MoneyMapHome> {
                     FilledButton(onPressed: _load, child: const Text('Retry')),
                   ]),
                 ))
-              : SafeArea(child: ListView(padding: const EdgeInsets.all(14), children: [
-                  if (_error != null) Card(
-                    color: Colors.red.shade50,
-                    child: Padding(padding: const EdgeInsets.all(12), child: Text(_error!)),
-                  ),
-                  _summary(),
-                  _reports(),
-                  _upcoming(),
-                  _limits(),
-                  _transactions(),
-                  _tasks(),
-                ])),
+              : SafeArea(child: _pageContent()),
+      bottomNavigationBar: _loading || _loadFailed || _page == 4 ? null : NavigationBar(
+        selectedIndex: _page,
+        onDestinationSelected: _selectPage,
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
+          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Activity'),
+          NavigationDestination(icon: Icon(Icons.show_chart), label: 'Trends'),
+          NavigationDestination(icon: Icon(Icons.event_note_outlined), label: 'Plan'),
+        ],
+      ),
     );
   }
+}
+
+class _BalanceLinePainter extends CustomPainter {
+  const _BalanceLinePainter(this.values);
+  final List<int> values;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.isEmpty) return;
+    const pad = 14.0;
+    final low = values.reduce((a, b) => a < b ? a : b).toDouble();
+    final high = values.reduce((a, b) => a > b ? a : b).toDouble();
+    final spread = high == low ? 1.0 : high - low;
+    final bottom = size.height - pad;
+    final width = size.width - pad * 2;
+    final height = size.height - pad * 2;
+    final grid = Paint()..color = const Color(0xFF344E6B)..strokeWidth = 1;
+    for (var i = 0; i <= 3; i++) {
+      final y = pad + i * height / 3;
+      canvas.drawLine(Offset(pad, y), Offset(size.width - pad, y), grid);
+    }
+    final points = List<Offset>.generate(values.length, (index) {
+      final x = pad + (values.length == 1 ? width / 2 : index * width / (values.length - 1));
+      final y = bottom - ((values[index] - low) / spread) * height;
+      return Offset(x, y);
+    });
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (var i = 1; i < points.length; i++) { path.lineTo(points[i].dx, points[i].dy); }
+    final area = Path.from(path)..lineTo(points.last.dx, bottom)..lineTo(points.first.dx, bottom)..close();
+    canvas.drawPath(area, Paint()..shader = const LinearGradient(
+      begin: Alignment.topCenter, end: Alignment.bottomCenter,
+      colors: [Color(0x7754ADFF), Color(0x0054ADFF)],
+    ).createShader(Offset.zero & size));
+    final line = Paint()..color = const Color(0xFF62C4FF)..strokeWidth = 3
+      ..style = PaintingStyle.stroke..strokeCap = StrokeCap.round;
+    canvas.drawPath(path, line);
+    for (final point in points) {
+      canvas.drawCircle(point, 4, Paint()..color = const Color(0xFFBCE8FF));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BalanceLinePainter oldDelegate) =>
+      oldDelegate.values.length != values.length ||
+      List.generate(values.length, (i) => values[i] != oldDelegate.values[i]).contains(true);
 }
